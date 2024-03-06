@@ -198,26 +198,31 @@ contract Verifier is IVerifier, ConfirmedOwner, TypeAndVersionInterface {
     return "Verifier 1.2.0";
   }
 
-  /// @inheritdoc IVerifier
+  /// @inheritdoc IVerifier 
   function verify(
-    bytes calldata signedReport,
-    address sender
-  ) external override returns (bytes memory verifierResponse) {
+    bytes calldata signedReport,  // 签名报告的字节数组
+    address sender  // 发送者地址
+  ) external override returns (bytes memory verifierResponse) {  // 返回验证器响应的字节数组
+
+    // 如果调用者不是 i_verifierProxyAddr 地址，则抛出 AccessForbidden 异常
     if (msg.sender != i_verifierProxyAddr) revert AccessForbidden();
+
+    // 解码签名报告
     (
-      bytes32[3] memory reportContext,
-      bytes memory reportData,
-      bytes32[] memory rs,
-      bytes32[] memory ss,
-      bytes32 rawVs
+      bytes32[3] memory reportContext,  // 报告上下文，包含 ConfigDigest、27字节填充、4字节时期和1字节轮次、ExtraHash
+      bytes memory reportData,  // 报告数据
+      bytes32[] memory rs,  // 签名 r 值数组
+      bytes32[] memory ss,  // 签名 s 值数组
+      bytes32 rawVs  // 未压缩的签名 v 值
     ) = abi.decode(signedReport, (bytes32[3], bytes, bytes32[], bytes32[], bytes32));
 
-    // The feed ID is the first 32 bytes of the report data.
+    // 报告的 Feed ID 是报告数据的前32个字节
     bytes32 feedId = bytes32(reportData);
 
+    // 获取 Feed ID 对应的 VerifierState
     VerifierState storage feedVerifierState = s_feedVerifierStates[feedId];
 
-    // If the feed has been deactivated, do not verify the report
+    // 如果该 Feed 已被停用，则抛出 InactiveFeed 异常
     if (feedVerifierState.isDeactivated) {
       revert InactiveFeed(feedId);
     }
@@ -227,36 +232,46 @@ contract Verifier is IVerifier, ConfirmedOwner, TypeAndVersionInterface {
     // reportContext[1]: 27 byte padding, 4-byte epoch and 1-byte round
     // reportContext[2]: ExtraHash
     bytes32 configDigest = reportContext[0];
+    // 获取对应 ConfigDigest 的配置
     Config storage s_config = feedVerifierState.s_verificationDataConfigs[configDigest];
 
+    // 验证报告的签名
     _validateReport(feedId, configDigest, rs, ss, s_config);
+    // 更新时期信息
     _updateEpoch(reportContext, feedVerifierState);
 
+    // 对报告数据进行哈希
     bytes32 hashedReport = keccak256(reportData);
 
+    // 验证签名
     _verifySignatures(hashedReport, reportContext, rs, ss, rawVs, s_config);
+    // 发出 ReportVerified 事件
     emit ReportVerified(feedId, sender);
 
+    // 返回报告数据
     return reportData;
   }
 
-  /// @notice Validates parameters of the report
-  /// @param feedId Feed ID from the report
-  /// @param configDigest Config digest from the report
-  /// @param rs R components from the report
-  /// @param ss S components from the report
-  /// @param config Config for the given feed ID keyed on the config digest
+  /// @notice 验证报告的参数
+  /// @param feedId 报告中的 Feed ID
+  /// @param configDigest 报告中的 Config 摘要
+  /// @param rs 报告中的 R 组件
+  /// @param ss 报告中的 S 组件
+  /// @param config 给定 Feed ID 上的配置，以配置摘要为键
   function _validateReport(
-    bytes32 feedId,
-    bytes32 configDigest,
-    bytes32[] memory rs,
-    bytes32[] memory ss,
-    Config storage config
+    bytes32 feedId,  // 报告中的 Feed ID
+    bytes32 configDigest,  // 报告中的 Config 摘要
+    bytes32[] memory rs,  // 报告中的 R 组件
+    bytes32[] memory ss,  // 报告中的 S 组件
+    Config storage config  // 给定 Feed ID 上的配置，以配置摘要为键
   ) private view {
-    uint8 expectedNumSignatures = config.f + 1;
+    uint8 expectedNumSignatures = config.f + 1;  // 期望的签名数量为配置中的 f+1
 
+    // 如果配置未激活，则抛出异常
     if (!config.isActive) revert DigestInactive(feedId, configDigest);
+    // 如果 R 组件的数量与期望的数量不匹配，则抛出异常
     if (rs.length != expectedNumSignatures) revert IncorrectSignatureCount(rs.length, expectedNumSignatures);
+    // 如果 R 组件和 S 组件的数量不匹配，则抛出异常
     if (rs.length != ss.length) revert MismatchedSignatures(rs.length, ss.length);
   }
 
